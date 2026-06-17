@@ -14,6 +14,8 @@
 \usepackage{natbib}
 \usepackage{setspace}
 
+\graphicspath{{figures/}}
+
 \hypersetup{
     colorlinks=true,
     linkcolor=blue,
@@ -76,7 +78,7 @@ Our key contributions are: (1) a simple, scalable method for augmenting fine-tun
 The computational study of indirect answers builds on Gricean pragmatics \citep{grice1975logic} and speech act theory \citep{searle1969speech}. \citet{louis2020} is the primary benchmark for this task; subsequent work has explored zero-shot prompting \citep{gpt3} and in-context learning approaches, but controlled fine-tuning studies with explicit augmentation remain limited.
 
 \paragraph{Data augmentation for NLP.}
-Data augmentation techniques---including paraphrase generation, back-translation, and synonym replacement---have improved robustness in low-resource settings \citep{wei2019eda}. More recent work uses LLMs to generate synthetic training data \citep{møller2023prompt}, but such approaches rarely provide \textit{rationales} alongside labels.
+Data augmentation techniques---including paraphrase generation, back-translation, and synonym replacement---have improved robustness in low-resource settings \citep{wei2019eda}. More recent work uses LLMs to generate synthetic training data \citep{moller2023prompt}, but such approaches rarely provide \textit{rationales} alongside labels.
 
 \paragraph{Chain-of-thought and knowledge distillation.}
 \citet{wei2022chain} showed that eliciting step-by-step reasoning from LLMs improves performance on complex tasks. \citet{hsieh2023distillation} demonstrated that smaller models can be fine-tuned on LLM-generated rationales to recover much of the performance gap---a process called \textit{reasoning distillation}. Our work applies this idea to pragmatic classification, where the reasoning chain must bridge the gap between surface form and communicative intent.
@@ -111,7 +113,7 @@ The \textit{Repeat} and \textit{Template} controls are key: if LLM augmentation 
 
 \subsection{Models and Training}
 
-We fine-tune three pre-trained encoders: \textbf{BERT-base} \citep{devlin2019bert}, \textbf{BERT-MNLI} \citep{liu2019roberta} (BERT pre-trained on the MultiNLI inference task, a strong baseline for semantic classification), and \textbf{RoBERTa-base} \citep{liu2019roberta}. All models are trained for 4 epochs with learning rate $2 \times 10^{-5}$, batch size 16, and linear warmup (10\%). The best checkpoint is selected by validation accuracy.
+We fine-tune three pre-trained encoders: \textbf{BERT-base} \citep{devlin2019bert}, \textbf{BERT-MNLI} \citep{devlin2019bert,williams2018mnli} (BERT fine-tuned on the MultiNLI inference task, a strong baseline for semantic classification), and \textbf{RoBERTa-base} \citep{liu2019roberta}. All models are trained for 4 epochs with learning rate $2 \times 10^{-5}$, batch size 16, and linear warmup (10\%). The best checkpoint is selected by validation accuracy.
 
 % ─────────────────────────────────────────────────────────────
 \section{Experimental Evaluation}
@@ -163,12 +165,19 @@ Oracle    & 100.0 & 100.0 & 100.0 \\
 \end{tabular}
 \end{table}
 
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{macro_f1.png}
+\caption{Macro-F1 across all augmentation conditions and encoder models. LLM augmentation outperforms every non-oracle control by at least 18 points. The golden highlight marks our proposed method.}
+\label{fig:macrof1bar}
+\end{figure}
+
 On accuracy, LLM augmentation is slightly below Repeat and Template for BERT-MNLI and RoBERTa. However, on macro-F1, LLM augmentation is the clear winner by a large margin: +25 points over baseline and +18--20 points over the best control condition. This discrepancy reveals that accuracy is a misleading metric here---Repeat and Template achieve high accuracy by concentrating predictions on the majority classes.
 
 \subsection{Analysis}
 
 \paragraph{Per-class breakdown.}
-Table~\ref{tab:perclass} shows per-class F1 for BERT-MNLI under the Baseline and LLM conditions.
+Table~\ref{tab:perclass} and Figure~\ref{fig:perclassbar} show per-class F1 for BERT-MNLI under the Baseline and LLM conditions.
 
 \begin{table}[t]
 \centering
@@ -190,6 +199,13 @@ Macro-F1              & 0.515 & 0.782 \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{per_class_f1.png}
+\caption{Per-class F1 for BERT-MNLI under Baseline vs.\ LLM augmentation. The two pragmatically subtle classes (\textit{Prob.\ No}, \textit{In Middle}) rise from zero to $>$0.71 F1 with LLM explanations; other classes are largely unaffected.}
+\label{fig:perclassbar}
+\end{figure}
 
 The effect is dramatic: Baseline achieves exactly 0.000 F1 on \textit{Probably no} and \textit{In the middle}---it never predicts these classes. LLM augmentation raises these to 0.717 and 0.719 respectively, while maintaining competitive performance on the other classes. This pattern holds consistently across all three encoder models.
 
