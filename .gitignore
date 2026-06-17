@@ -1,0 +1,30 @@
+# secrets / local config
+.env
+settings.py
+functions.py
+
+# large training artifacts
+outputs/
+*.pt
+*.bin
+*.pyc
+__pycache__/
+
+# environments
+venv/
+.venv/
+
+# raw data (too large / not redistributable)
+data/circa-data.tsv
+
+# notebooks scratch
+notebooks/
+
+# submission zips (regeneratable) and utility scripts
+submission/*.zip
+submission/gen_v2.py
+submission/inspect_old_pptx.py
+
+# Office temp lock files
+~$*
+

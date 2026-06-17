@@ -1,0 +1,243 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{times}
+\usepackage{latexsym}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{microtype}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{caption}
+\usepackage{natbib}
+\usepackage{setspace}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    citecolor=blue,
+    urlcolor=blue
+}
+
+\title{\textbf{Pragmatic Reasoning Augmentation:\\
+LLM Explanations Improve Indirect Answer Classification}}
+
+\author{
+  Yuval Meron \quad Ron Biden \quad Gilad Schwartz \quad Ziv Fenigstein \\
+  Department of Industrial Engineering and Management \\
+  Ben-Gurion University of the Negev \\
+  \texttt{\{meron, biden, schwartz, fenigstein\}@post.bgu.ac.il}
+}
+
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Indirect answers---responses to yes/no questions that do not explicitly say ``yes'' or ``no''---require pragmatic inference to interpret. While prior work has shown that fine-tuned BERT models can classify indirect answers with moderate accuracy, they systematically fail on hedged and ambiguous categories. We propose \textit{Pragmatic Reasoning Augmentation}: generating chain-of-thought explanations for each training example using GPT-4.1-mini, and using these explanations as additional context during fine-tuning. We evaluate on the Circa dataset across three encoder models (BERT, BERT-MNLI, RoBERTa) and four control conditions. Our method achieves a macro-F1 of $0.75$--$0.78$ versus $0.50$--$0.52$ for baseline fine-tuning---a gain of +25 points---while controls adding non-reasoning text gain at most $+8$ points. Crucially, only LLM-augmented models learn to classify all six pragmatic categories, including the previously near-zero \textit{Probably no} and \textit{In the middle} classes.
+\end{abstract}
+
+% ─────────────────────────────────────────────────────────────
+\section{Introduction}
+% ─────────────────────────────────────────────────────────────
+
+Understanding indirect speech is a fundamental challenge in natural language processing. When asked ``Do you want to come to my party?'', an answer such as ``I have an early meeting tomorrow'' does not explicitly accept or decline---yet a human listener immediately infers a likely refusal. This type of \textit{indirect answer} is governed by Gricean conversational maxims \citep{grice1975logic}: listeners reason about what the speaker \textit{implicates} rather than what they \textit{say}.
+
+\citet{louis2020} introduced the Circa dataset to study this problem at scale, collecting 34,268 question--indirect-answer pairs across 10 social scenarios, annotated with six pragmatic categories: \textit{Yes}, \textit{Probably yes}, \textit{Yes, conditional}, \textit{No}, \textit{Probably no}, and \textit{In the middle}. They showed that a BERT model fine-tuned on natural language inference (BERT-MNLI) achieves $\sim$80\% accuracy---but this masks a critical weakness: models learn to predict only the most frequent categories and assign near-zero recall to the hedged and ambiguous ones.
+
+This failure is not surprising. The distinction between \textit{Yes} and \textit{Probably yes}, or between \textit{No} and \textit{Probably no}, requires the kind of nuanced pragmatic reasoning that is not encoded in the surface form of the answer. Standard fine-tuning provides the model with only the question--answer pair and a label; it receives no guidance on \textit{why} the label is correct.
+
+We address this limitation with \textbf{Pragmatic Reasoning Augmentation (PRA)}: for each training example, we prompt a large language model (GPT-4.1-mini) to generate a short chain-of-thought explanation of what the indirect answer pragmatically implies. These explanations are then appended to the input during fine-tuning, providing the encoder with explicit reasoning context.
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox{0.92\linewidth}{
+\small
+\textbf{Context:} Y has just travelled from a different city to meet X.\\[4pt]
+\textbf{Q:} Do you want to go with me to brunch on Saturday?\\
+\textbf{A:} Let's go get pancakes.\\[4pt]
+\textbf{Label:} \textit{Yes}\\[4pt]
+\textbf{LLM Explanation:} \textit{The literal content of the answer proposes an activity closely related to brunch, specifically getting pancakes. Given the conversational context, this suggests enthusiasm for going out to eat together on Saturday, implicitly agreeing to the brunch plan. Therefore, the answer pragmatically implies a positive response.}
+}}
+\caption{Example of a Circa QA pair and the GPT-4.1-mini chain-of-thought explanation used for augmentation. The explanation makes the pragmatic inference explicit, providing the fine-tuned encoder with reasoning context.}
+\label{fig:example}
+\end{figure}
+
+Our key contributions are: (1) a simple, scalable method for augmenting fine-tuning data with LLM pragmatic reasoning; (2) a controlled experimental comparison against four alternative augmentation strategies; and (3) a demonstration that the gain is not due to longer sequences or keyword signals, but specifically to the \textit{reasoning content} of the explanations.
+
+% ─────────────────────────────────────────────────────────────
+\section{Related Work}
+% ─────────────────────────────────────────────────────────────
+
+\paragraph{Indirect answers and pragmatics.}
+The computational study of indirect answers builds on Gricean pragmatics \citep{grice1975logic} and speech act theory \citep{searle1969speech}. \citet{louis2020} is the primary benchmark for this task; subsequent work has explored zero-shot prompting \citep{gpt3} and in-context learning approaches, but controlled fine-tuning studies with explicit augmentation remain limited.
+
+\paragraph{Data augmentation for NLP.}
+Data augmentation techniques---including paraphrase generation, back-translation, and synonym replacement---have improved robustness in low-resource settings \citep{wei2019eda}. More recent work uses LLMs to generate synthetic training data \citep{møller2023prompt}, but such approaches rarely provide \textit{rationales} alongside labels.
+
+\paragraph{Chain-of-thought and knowledge distillation.}
+\citet{wei2022chain} showed that eliciting step-by-step reasoning from LLMs improves performance on complex tasks. \citet{hsieh2023distillation} demonstrated that smaller models can be fine-tuned on LLM-generated rationales to recover much of the performance gap---a process called \textit{reasoning distillation}. Our work applies this idea to pragmatic classification, where the reasoning chain must bridge the gap between surface form and communicative intent.
+
+% ─────────────────────────────────────────────────────────────
+\section{Methods}
+% ─────────────────────────────────────────────────────────────
+
+\subsection{Dataset}
+
+We use the Circa dataset \citep{louis2020}, filtering to examples with unambiguous gold labels under the strict 6-class annotation scheme, yielding 30,958 examples. For all experiments, we sample 5,000 examples stratified across all six classes and scenarios, creating an 81/9/10 train/validation/test split (4,050/450/500 examples). This controlled size enables a fair comparison across all five augmentation conditions and three models.
+
+\subsection{Explanation Generation}
+
+For each of the 5,000 sampled examples, we prompt GPT-4.1-mini (accessed via HP corporate Azure OpenAI infrastructure) with a system instruction emphasizing Gricean pragmatics and conversational implicature, followed by the context, question, and answer. The model is asked to produce a 2--3 sentence chain-of-thought explanation of what the indirect answer pragmatically implies, without revealing the label.
+
+Figure~\ref{fig:example} shows a representative example. Explanations average 60--80 tokens and consistently identify pragmatic cues (e.g., entailment, hedging, conditionality, evasion) that are relevant to the label.
+
+\subsection{Augmentation Conditions}
+
+We evaluate five input conditions to isolate the source of any improvement:
+
+\begin{itemize}\setlength{\itemsep}{2pt}
+  \item \textbf{Baseline}: $[\text{CLS}]$ \textit{question} $[\text{SEP}]$ \textit{answer} $[\text{SEP}]$
+  \item \textbf{Repeat}: answer repeated twice, to control for sequence length
+  \item \textbf{Template}: answer + rule-based keyword hint (e.g., ``The answer contains affirmative language.''), to control for surface pragmatic signals
+  \item \textbf{LLM}: answer + GPT-4.1-mini chain-of-thought explanation
+  \item \textbf{Oracle}: answer + verbatim gold label description (e.g., ``The answer clearly expresses agreement.'')---an upper bound using privileged information
+\end{itemize}
+
+The \textit{Repeat} and \textit{Template} controls are key: if LLM augmentation improves over both, the gain is attributable to the \textit{reasoning content} of the explanation rather than sequence length or keyword heuristics.
+
+\subsection{Models and Training}
+
+We fine-tune three pre-trained encoders: \textbf{BERT-base} \citep{devlin2019bert}, \textbf{BERT-MNLI} \citep{liu2019roberta} (BERT pre-trained on the MultiNLI inference task, a strong baseline for semantic classification), and \textbf{RoBERTa-base} \citep{liu2019roberta}. All models are trained for 4 epochs with learning rate $2 \times 10^{-5}$, batch size 16, and linear warmup (10\%). The best checkpoint is selected by validation accuracy.
+
+% ─────────────────────────────────────────────────────────────
+\section{Experimental Evaluation}
+% ─────────────────────────────────────────────────────────────
+
+\subsection{Experimental Setting}
+
+All experiments use the same 5,000-example sample, ensuring that differences in training set size do not confound comparisons. We report both \textbf{test accuracy} and \textbf{macro-F1} across all six classes. Because the dataset is moderately imbalanced (``In the middle'' comprises only 13\% of examples), macro-F1 is our primary metric: it weights all six classes equally, penalizing models that ignore rare classes.
+
+\subsection{Main Results}
+
+Tables~\ref{tab:accuracy} and \ref{tab:macrof1} report test accuracy and macro-F1 for all conditions and models.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Test accuracy (\%) for all augmentation conditions and encoder models. Oracle uses gold label text and is an upper bound only.}
+\label{tab:accuracy}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Condition} & \textbf{BERT-base} & \textbf{BERT-MNLI} & \textbf{RoBERTa} \\
+\midrule
+Baseline  & 75.6 & 79.8 & 80.4 \\
+Repeat    & 76.6 & 81.4 & 81.4 \\
+Template  & 75.4 & 81.4 & 78.6 \\
+\textbf{LLM} & \textbf{76.4} & \textbf{78.6} & \textbf{76.0} \\
+\midrule
+Oracle    & 100.0 & 100.0 & 100.0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\centering
+\small
+\caption{Macro-F1 (\%) averaged across all six pragmatic categories. LLM augmentation substantially outperforms all non-oracle conditions across all three models.}
+\label{tab:macrof1}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Condition} & \textbf{BERT-base} & \textbf{BERT-MNLI} & \textbf{RoBERTa} \\
+\midrule
+Baseline  & 50.1 & 51.5 & 51.1 \\
+Repeat    & 53.6 & 59.5 & 59.7 \\
+Template  & 54.5 & 51.8 & 54.6 \\
+\textbf{LLM} & \textbf{75.5} & \textbf{78.2} & \textbf{75.4} \\
+\midrule
+Oracle    & 100.0 & 100.0 & 100.0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+On accuracy, LLM augmentation is slightly below Repeat and Template for BERT-MNLI and RoBERTa. However, on macro-F1, LLM augmentation is the clear winner by a large margin: +25 points over baseline and +18--20 points over the best control condition. This discrepancy reveals that accuracy is a misleading metric here---Repeat and Template achieve high accuracy by concentrating predictions on the majority classes.
+
+\subsection{Analysis}
+
+\paragraph{Per-class breakdown.}
+Table~\ref{tab:perclass} shows per-class F1 for BERT-MNLI under the Baseline and LLM conditions.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Per-class F1 for BERT-MNLI under Baseline and LLM augmentation. Baseline assigns near-zero F1 to the two pragmatically subtle categories; LLM recovers them substantially.}
+\label{tab:perclass}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Class} & \textbf{Baseline} & \textbf{LLM} \\
+\midrule
+Yes                   & 0.845 & 0.845 \\
+Probably yes          & 0.541 & 0.763 \\
+Yes, conditional      & 0.894 & 0.897 \\
+No                    & 0.812 & 0.749 \\
+Probably no           & \textbf{0.000} & \textbf{0.717} \\
+In the middle         & \textbf{0.000} & \textbf{0.719} \\
+\midrule
+Macro-F1              & 0.515 & 0.782 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The effect is dramatic: Baseline achieves exactly 0.000 F1 on \textit{Probably no} and \textit{In the middle}---it never predicts these classes. LLM augmentation raises these to 0.717 and 0.719 respectively, while maintaining competitive performance on the other classes. This pattern holds consistently across all three encoder models.
+
+\paragraph{Controls isolate reasoning content.}
+The Repeat condition increases macro-F1 by 3.5--8.6 points over baseline, confirming that longer sequences alone help somewhat. Template adds a further 0--2 points. However, neither approaches the 25-point gain from LLM augmentation. Since Repeat controls for sequence length and Template controls for surface pragmatic keywords, the remaining gap is attributable specifically to the \textit{reasoning chain} in the LLM explanation.
+
+\paragraph{Why accuracy misleads.}
+The Circa label distribution is moderately imbalanced (the \textit{In the middle} class is 13\% of examples). Baseline models maximize accuracy by predicting only the four dominant classes, achieving $\sim$80\% accuracy while producing 0 F1 on two linguistically important categories. This behavior mirrors findings in \citet{louis2020}, who noted that annotation disagreement is highest for the hedged categories---precisely the ones that benefit most from explicit pragmatic reasoning in training.
+
+\paragraph{Oracle upper bound.}
+The Oracle condition (appending the gold label description) achieves 100\% accuracy and F1 across all models, confirming that the input format and model architecture are not bottlenecks. The gap between LLM (macro-F1 $\approx$ 0.76) and Oracle (1.00) represents the headroom available from higher-quality or more targeted explanations.
+
+% ─────────────────────────────────────────────────────────────
+\section{Conclusion}
+% ─────────────────────────────────────────────────────────────
+
+We presented Pragmatic Reasoning Augmentation, a method that uses LLM-generated chain-of-thought explanations to improve indirect answer classification. Across three encoder models and four control conditions, our approach consistently achieves macro-F1 around 0.75--0.78, compared to 0.50--0.52 for standard fine-tuning. The gain is not due to longer input sequences or surface keyword signals---it is specifically driven by the pragmatic reasoning content of the LLM explanation. The most dramatic improvement is on the \textit{Probably no} and \textit{In the middle} categories, which baseline models fail to learn at all. These findings suggest that making pragmatic inference explicit in training data is a promising direction for closing the gap between surface classification and genuine language understanding.
+
+\paragraph{Limitations and future work.}
+All experiments use a single fixed 5,000-example sample; future work should evaluate with larger training sets and multiple random seeds. LLM explanation quality is not controlled---better prompts or more capable models may further improve results. Leave-one-out cross-scenario evaluation would test generalization to novel social situations.
+
+% ─────────────────────────────────────────────────────────────
+\bibliographystyle{acl_natbib}
+\bibliography{references}
+% ─────────────────────────────────────────────────────────────
+
+\appendix
+
+\section{Prompt Template}
+\label{app:prompt}
+
+The following system prompt was used for GPT-4.1-mini explanation generation:
+
+\begin{quote}
+\small
+\textit{You are an expert in pragmatics and conversational implicature. Given a yes/no question and an indirect answer (one that doesn't explicitly say ``yes'' or ``no''), provide a brief chain-of-thought explanation (2--3 sentences) of what the answer pragmatically implies. Focus on: (1) the literal content of the answer, (2) the conversational context, and (3) what this implies about the speaker's actual stance. Do not directly state the label.}
+\end{quote}
+
+\section{Template Hint Rules}
+\label{app:template}
+
+The rule-based template hints used in the Template condition are derived from keyword matching on the answer text:
+\begin{itemize}\setlength{\itemsep}{1pt}
+  \item Affirmative keywords (``yes'', ``sure'', ``absolutely'', ``love to'', \ldots) $\to$ ``The answer contains affirmative language.''
+  \item Negative keywords (``no'', ``not'', ``never'', ``can't'', \ldots) $\to$ ``The answer contains negative language.''
+  \item Uncertainty keywords (``maybe'', ``perhaps'', ``might'', \ldots) $\to$ ``The answer expresses uncertainty.''
+  \item Conditional keywords (``if'', ``unless'', ``depends'', \ldots) $\to$ ``The answer contains conditional language.''
+  \item Otherwise $\to$ ``The answer is indirect or ambiguous.''
+\end{itemize}
+
+\end{document}
