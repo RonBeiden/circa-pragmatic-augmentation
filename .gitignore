@@ -20,10 +20,8 @@ data/circa-data.tsv
 # notebooks scratch
 notebooks/
 
-# submission zips (regeneratable) and utility scripts
-submission/*.zip
-submission/gen_v2.py
-submission/inspect_old_pptx.py
+# submission folder (local only)
+submission/
 
 # Office temp lock files
 ~$*
